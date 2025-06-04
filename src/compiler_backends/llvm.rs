@@ -265,10 +265,38 @@ impl CompileTarget for LLVMCompiler {
             }
             Expr::App(func, args) => {
                 let func_val = self.compile_expr(func, _env)?;
-                let arg_vals = args.iter().map(|a| self.compile_expr(a, _env)).collect::<Result<Vec<_>>>()?;
+                let arg_vals = args
+                    .iter()
+                    .map(|a| self.compile_expr(a, _env))
+                    .collect::<Result<Vec<_>>>()?;
                 let result_reg = self.fresh_reg();
-                let arg_list = arg_vals.iter().map(|v| format!("i64 {}", v)).collect::<Vec<_>>().join(", ");
-                self.emit(&format!("  {result_reg} = call i64 {func_val}({arg_list})"));
+                let mut arg_strings = Vec::new();
+
+                for arg_val in &arg_vals {
+                    let arg_str = if arg_val.starts_with('@') {
+                        let casted = self.fresh_reg();
+                        self.emit(&format!(
+                            "  {casted} = ptrtoint i64 ({})* {} to i64",
+                            "i64", // ajusta si sabes el tipo real
+                            arg_val
+                        ));
+                        casted
+                    } else {
+                        arg_val.clone()
+                    };
+                    arg_strings.push(format!("i64 {}", arg_str));
+                }
+
+                let arg_list = arg_strings.join(", ");
+
+                if func_val.starts_with('@') {
+                    self.emit(&format!("  {result_reg} = call i64 {func_val}({arg_list})"));
+                } else {
+                    let casted_fn = self.fresh_reg();
+                    let fn_type = format!("i64({})", vec!["i64"; arg_vals.len()].join(", "));
+                    self.emit(&format!("  {casted_fn} = inttoptr i64 {func_val} to {fn_type}*"));
+                    self.emit(&format!("  {result_reg} = call i64 {casted_fn}({arg_list})"));
+                }
                 Ok(result_reg)
             },
             Expr::Array(values) => {
