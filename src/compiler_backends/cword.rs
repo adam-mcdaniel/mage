@@ -3,14 +3,15 @@ use super::{CompileTarget, Stmt, Expr, Env, lift_global_decls, wrap_symbol_name}
 use std::fmt::Write;
 
 #[derive(Default)]
-pub struct CCompiler;
+pub struct CWordCompiler;
 
 fn to_c_func_type(arg_count: usize) -> String {
-    format!("int64_t (*)({})", (0..arg_count).map(|_| "int64_t").collect::<Vec<_>>().join(", "))
+    format!("intptr_t (*)({})", (0..arg_count).map(|_| "intptr_t").collect::<Vec<_>>().join(", "))
 }
 
-impl CCompiler {
+impl CWordCompiler {
     fn create_headers(&self, stmt: &Stmt, output: &mut dyn std::fmt::Write) {
+        println!("Creating headers for CWordCompiler");
         match stmt.strip_annotations() {
             Stmt::Block(stmts) => {
                 for stmt in stmts {
@@ -18,7 +19,7 @@ impl CCompiler {
                 }
             }
             Stmt::DeclareProc { name, args, .. } => {
-                writeln!(output, "int64_t {}({});", wrap_symbol_name(name), args.iter().map(|arg| format!("int64_t {}", wrap_symbol_name(arg))).collect::<Vec<_>>().join(", ")).unwrap();
+                writeln!(output, "intptr_t {}({});", wrap_symbol_name(name), args.iter().map(|arg| format!("intptr_t {}", wrap_symbol_name(arg))).collect::<Vec<_>>().join(", ")).unwrap();
             }
             _ => {
                 // For other statements, we don't need to create headers
@@ -27,13 +28,13 @@ impl CCompiler {
     }
 }
 
-impl CompileTarget for CCompiler {
+impl CompileTarget for CWordCompiler {
     fn has_extern(&self, _name: &str) -> bool {
         true
     }
 
     fn compile_main(&mut self, stmt: Stmt) -> Result<String> {
-        let mut prelude = String::from("#include <stdint.h>\n#include <stddef.h>\n#include <string.h>\nint64_t mage_as_int(double x) {{ return *(int64_t*)&x; }}\n\n#if __has_include(\"ffi.h\")\n#include \"ffi.h\"\n#endif\n\n/* BEGIN PROCEDURES */");
+        let mut prelude = String::from("#include <stdint.h>\n#include <stddef.h>\n#include <string.h>\nintptr_t mage_as_int(double x) {{ return *(intptr_t*)&x; }}\n\n#if __has_include(\"ffi.h\")\n#include \"ffi.h\"\n#endif\n\n/* BEGIN PROCEDURES */");
         // Create headers for the procedures
         self.create_headers(&stmt, &mut prelude);
 
@@ -56,7 +57,7 @@ impl CompileTarget for CCompiler {
     }
 
     fn compile_lib(&mut self, stmt: Stmt) -> Result<String> {
-        let mut prelude = String::from("#include <stdint.h>\n#include <stddef.h>\n#include <string.h>\nint64_t mage_as_int(double x) {{ return *(int64_t*)&x; }}\n\n#if __has_include(\"ffi.h\")\n#include \"ffi.h\"\n#endif\n\n/* BEGIN PROCEDURES */");
+        let mut prelude = String::from("#include <stdint.h>\n#include <stddef.h>\n#include <string.h>\nintptr_t mage_as_int(double x) {{ return *(intptr_t*)&x; }}\n\n#if __has_include(\"ffi.h\")\n#include \"ffi.h\"\n#endif\n\n/* BEGIN PROCEDURES */");
         // Create headers for the procedures
         self.create_headers(&stmt, &mut prelude);
         let (procs, program) = lift_global_decls(vec![stmt]);
@@ -87,10 +88,10 @@ impl CompileTarget for CCompiler {
             Expr::Float(value) => Ok(format!("mage_as_int({value:?})")),
             Expr::Bool(value) => Ok(if *value { "1" } else { "0" }.to_string()),
             Expr::Var(name) => Ok(wrap_symbol_name(name)),
-            Expr::Ref(name) => Ok(format!("((int64_t)&{})", wrap_symbol_name(name))),
+            Expr::Ref(name) => Ok(format!("((intptr_t)&{})", wrap_symbol_name(name))),
             Expr::App(func, args) => {
                 let func = self.compile_expr(func, _env)?;
-                let args = args.iter().map(|arg| Ok(format!("(int64_t)({})", self.compile_expr(arg, _env)?))).collect::<Result<Vec<_>>>()?;
+                let args = args.iter().map(|arg| Ok(format!("(intptr_t)({})", self.compile_expr(arg, _env)?))).collect::<Result<Vec<_>>>()?;
                 Ok(format!("(({}){})({})", to_c_func_type(args.len()), func, args.join(", ")))
                 // let args = args.iter().map(|arg| self.compile_expr(arg, _env)).collect::<Result<Vec<_>>>()?;
                 // Ok(format!("{}({})", func, args.join(", ")))
@@ -98,7 +99,7 @@ impl CompileTarget for CCompiler {
             Expr::Array(values) => {
                 let values = values.iter().map(|value| self.compile_expr(value, _env)).collect::<Result<Vec<_>>>()?;
                 // Allocate on the stack
-                Ok(format!("(int64_t)(int64_t*)(int64_t[]){{ {} }}", values.join(", ")))
+                Ok(format!("(intptr_t)(intptr_t*)(intptr_t[]){{ {} }}", values.join(", ")))
             }
         }
     }
@@ -120,23 +121,23 @@ impl CompileTarget for CCompiler {
                 let name = wrap_symbol_name(name);
                 let value = self.compile_expr(value, _env)?;
                 if *is_static {
-                    Ok(format!("static int64_t {} = {};", name, value))
+                    Ok(format!("static intptr_t {} = {};", name, value))
                 } else {
-                    Ok(format!("int64_t {} = {};", name, value))
+                    Ok(format!("intptr_t {} = {};", name, value))
                 }
             }
             Stmt::DeclareProc { name, args, body } => {
                 let name = wrap_symbol_name(name);
                 let new_env = _env.new_scope();
-                let args = args.iter().map(|arg| format!("int64_t {}", wrap_symbol_name(arg))).collect::<Vec<_>>().join(", ");
+                let args = args.iter().map(|arg| format!("intptr_t {}", wrap_symbol_name(arg))).collect::<Vec<_>>().join(", ");
                 let body = self.compile_stmt(body, &new_env)?;
-                Ok(format!("int64_t {}({}) {{\n{}\nreturn 0;\n}}", name, args, body))
+                Ok(format!("intptr_t {}({}) {{\n{}\nreturn 0;\n}}", name, args, body))
             }
             Stmt::ExternProc { name, args, body } => {
                 if self.has_extern(name.as_ref()) {
                     let name = wrap_symbol_name(name);
-                    let args = args.iter().map(|arg| format!("int64_t {}", arg)).collect::<Vec<_>>().join(", ");
-                    Ok(format!("int64_t {}({});", name, args))
+                    let args = args.iter().map(|arg| format!("intptr_t {}", arg)).collect::<Vec<_>>().join(", ");
+                    Ok(format!("intptr_t {}({});", name, args))
                 } else if let Some(body) = body {
                     // Use the body as a fallback
                     self.compile_stmt(&Stmt::DeclareProc { name: name.clone(), args: args.clone(), body: body.clone() }, _env)
@@ -152,7 +153,7 @@ impl CompileTarget for CCompiler {
             Stmt::AssignRef(dst, src) => {
                 let dst = self.compile_expr(dst, _env)?;
                 let src = self.compile_expr(src, _env)?;
-                Ok(format!("*(int64_t*){} = {};", dst, src))
+                Ok(format!("*(intptr_t*){} = {};", dst, src))
             }
             Stmt::While(cond, body_) => {
                 let cond = self.compile_expr(cond, _env)?;

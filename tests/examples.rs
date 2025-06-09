@@ -126,7 +126,7 @@ fn test_expected_pass_c_backend() -> Result<()> {
         let program = parse(&code)?;
 
         // 3) Compile to LLVM IR
-        let c = CCompiler.compile(program)?;  
+        let c = CCompiler.compile_main(program)?;  
         // NOTE: you might have your own `LLVMBackend::new()`, etc. 
         // The key is that we now produce IR as a string.
 
@@ -203,7 +203,7 @@ fn test_expected_pass_llvm_backend() -> Result<()> {
         let program = parse(&code)?;
 
         // 3) Compile to LLVM IR
-        let llvm_ir = LLVMCompiler::default().compile(program)?;  
+        let llvm_ir = LLVMCompiler::default().compile_main(program)?;  
         // NOTE: you might have your own `LLVMBackend::new()`, etc. 
         // The key is that we now produce IR as a string.
 
@@ -273,7 +273,7 @@ fn test_expected_fail_c_backend() -> Result<()> {
         let program = parse(&code)?;
 
         // 3) Compile to C
-        let c_code = CCompiler.compile(program)?;  // from mage::lir::C, presumably
+        let c_code = CCompiler.compile_main(program)?;  // from mage::lir::C, presumably
 
         // 4) Write to .c file
         let c_path = path.with_extension("c");

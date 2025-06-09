@@ -13,6 +13,7 @@ use clap::{Parser, ValueEnum};
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Default)]
 enum Backend {
     C,
+    CWord,
     Llvm,
     #[default]
     Interpreter,
@@ -47,6 +48,10 @@ struct Args {
     /// Compile with address sanitizer
     #[arg(long)]
     asan: bool,
+
+    /// Compile to a library
+    #[arg(long, default_value_t = false)]
+    lib: bool,
 }
 
 fn repl() -> Result<()> {
@@ -140,33 +145,34 @@ fn main() -> Result<()> {
     let program = parse(&input).context("Failed to parse input file")?;
 
     let output = match args.target.unwrap_or(Backend::Interpreter) {
+        Backend::C if args.lib => {
+            let mut c = CCompiler;
+            c.compile_lib(program)?
+        }
+        Backend::CWord if args.lib => {
+            let mut c = CWordCompiler;
+            c.compile_lib(program)?
+        }
+        Backend::Llvm if args.lib => {
+            let mut llvm = LLVMCompiler::default();
+            llvm.compile_lib(program)?
+        }
         Backend::C => {
             let mut c = CCompiler;
-            c.compile(program)?
+            c.compile_main(program)?
+        }
+        Backend::CWord => {
+            let mut c = CWordCompiler;
+            c.compile_main(program)?
         }
         Backend::Llvm => {
             let mut llvm = LLVMCompiler::default();
-            llvm.compile(program)?
+            llvm.compile_main(program)?
         }
         Backend::Interpreter => {
             let i = Interpreter::new(InteractiveInterface);
             let _interface = i.run(&program).context("Failed to run program")?;
 
-            /*
-            use std::io::Read;
-            let path = std::path::Path::new(&args.input_file);
-            let mut input_text = String::new();
-            let input_file_path = path.with_extension("in.txt");
-            if input_file_path.exists() {
-                File::open(input_file_path)?.read_to_string(&mut input_text)?;
-            } else {
-                tracing::warn!("No input file found for {}", path.display());
-            }
-
-            let i = Interpreter::new(TestInterface::default().with_string_input(&input_text));
-            let interface = i.run(&program).context("Failed to run program")?;
-            println!("{}", interface.output_string());
-            */
 
             "".to_string()
         }
@@ -179,13 +185,13 @@ fn main() -> Result<()> {
     let path = std::path::Path::new(args.output_file.as_deref().unwrap_or("output")).with_extension(
         match args.target.unwrap() {
             Backend::C => "c",
+            Backend::CWord => "c",
             Backend::Llvm => "ll",
             Backend::Interpreter => unreachable!(),
         }
     );
     let mut file = File::create(&path)?;
     write!(file, "{}", output)?;
-
     // Compile the file
     let mut cmd = std::process::Command::new("clang");
     if args.libraries.iter().any(|lib| lib.ends_with(".c")) {
@@ -208,12 +214,18 @@ fn main() -> Result<()> {
         cmd.arg("-fsanitize=address");
         info!("Compiling with address sanitizer");
     }
-    let status = cmd.arg("-o")
-        .arg(path.with_extension("exe"))
-        .status()?;
+
+    let status = if args.lib {
+        cmd.arg("-c")
+
+    } else {
+        cmd.arg("-o")
+            .arg(path.with_extension("exe"))
+            
+    }.status()?;
+
     if !status.success() {
         return Err(anyhow::anyhow!("Failed to compile {}", path.display()));
     }
-
     Ok(())
 }

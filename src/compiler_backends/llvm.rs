@@ -118,6 +118,17 @@ impl LLVMCompiler {
     fn is_known_function(&self, name: &str) -> bool {
         self.known_functions.contains(name)
     }
+
+    fn create_headers(&self, procs: &Vec<Stmt>, output: &mut dyn std::fmt::Write) {
+        // Add known functions
+        for proc in procs {
+            if let Stmt::DeclareProc { name, args, .. } = proc.strip_annotations() {
+                let fn_name = wrap_symbol_name(name);
+                let arg_types = args.iter().map(|_| "i64").collect::<Vec<_>>().join(", ");
+                writeln!(output, "declare i64 @{fn_name}({arg_types})").unwrap();
+            }
+        }
+    }
 }
 
 impl CompileTarget for LLVMCompiler {
@@ -125,7 +136,7 @@ impl CompileTarget for LLVMCompiler {
         true
     }
 
-    fn compile(&mut self, program: Stmt) -> Result<String> {
+    fn compile_main(&mut self, program: Stmt) -> Result<String> {
         let (procs, stmts) = lift_global_decls(vec![program]);
 
         // Add known functions for extern and declared procedures
@@ -165,7 +176,7 @@ impl CompileTarget for LLVMCompiler {
         #[cfg(target_os = "windows")]
         code.push_str("target triple = \"x86_64-pc-windows-msvc\"\n\n");
 
-
+        // self.create_headers(&procs, &mut code);
 
         // External function declarations
         for p in &procs {
@@ -204,6 +215,80 @@ impl CompileTarget for LLVMCompiler {
         let main_def = self.end_function();
         code.push_str(&main_def);
         code.push('\n');
+
+        Ok(code)
+    }
+
+    fn compile_lib(&mut self, program: Stmt) -> Result<String> {
+        let (procs, stmts) = lift_global_decls(vec![program]);
+
+        // Add known functions for extern and declared procedures
+        for p in &procs {
+            match p.strip_annotations() {
+                Stmt::DeclareProc { name, .. } => {
+                    let fn_name = wrap_symbol_name(name);
+                    self.known_functions.insert(fn_name);
+                }
+                Stmt::ExternProc { name, .. } => {
+                    let fn_name = wrap_symbol_name(name);
+                    self.known_functions.insert(fn_name);
+                }
+                Stmt::DeclareVar { name, is_static: true, value } => {
+                    let global_name = wrap_symbol_name(name);
+                    self.known_globals.insert(global_name.clone(), global_name.clone());
+                    let initial_val = match *value.clone() {
+                        Expr::Int(v) => v.to_string(),
+                        Expr::Char(c) => (c as i64).to_string(),
+                        Expr::Float(f) => (f64::to_bits(f) as i64).to_string(),
+                        Expr::Bool(b) => self.bool_to_int(b).to_string(),
+                        // _ => "0".to_string() // fallback for non-constant initializers
+                        other => return Err(anyhow::anyhow!("Unsupported global initializer type: {other:?}").context("Global variables must be initialized with a constant expression, e.g. an integer, character, float, or boolean")),
+                    };
+                    self.global_declarations.push(format!("@{} = global i64 {}", global_name, initial_val));
+                }
+                _ => {}
+            }
+        }
+        let mut code = String::new();
+        code.push_str("; ModuleID = 'mage_output'\n");
+        #[cfg(target_os = "macos")]
+        code.push_str("target triple = \"arm64-apple-macosx14.0.0\"\n\n");
+        #[cfg(target_os = "linux")]
+        code.push_str("target triple = \"x86_64-unknown-linux-gnu\"\n\n");
+        #[cfg(target_os = "windows")]
+        code.push_str("target triple = \"x86_64-pc-windows-msvc\"\n\n");
+
+        // self.create_headers(&procs, &mut code);
+
+        // External function declarations
+        for p in &procs {
+            if let Stmt::ExternProc { name, args, .. } = p.strip_annotations() {
+                let fn_name = wrap_symbol_name(name);
+                let arg_types = args.iter().map(|_| "i64").collect::<Vec<_>>().join(", ");
+                code.push_str(&format!("declare i64 @{fn_name}({arg_types})\n"));
+            }
+        }
+
+        // Emit global variables
+        for gdecl in &self.global_declarations {
+            code.push_str(&format!("{}\n", gdecl));
+        }
+
+        code.push('\n');
+
+        // Define user-defined procedures
+        for p in &procs {
+            if let Stmt::DeclareProc { name, args, body } = p.strip_annotations() {
+                let fn_name = wrap_symbol_name(name);
+                self.begin_function(&fn_name, args);
+                self.compile_stmt(body, &Env::default())?;
+                // If no explicit return, return 0
+                self.emit("  ret i64 0");
+                let fn_def = self.end_function();
+                code.push_str(&fn_def);
+                code.push_str("\n\n");
+            }
+        }
 
         Ok(code)
     }

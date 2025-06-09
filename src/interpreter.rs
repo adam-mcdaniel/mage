@@ -240,7 +240,7 @@ impl<T: Interface> Interpreter<T> {
                     self.env.insert(name.clone(), result);
                 }
             }
-            Stmt::DeclareProc { name, args, body } => {
+            Stmt::DeclareProc { name, args, body, .. } => {
                 self.add_proc(name.clone(), args.clone(), body.clone());
             }
             Stmt::ExternProc { name, args, body } => {

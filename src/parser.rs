@@ -636,6 +636,9 @@ fn parse_extern_proc<'a, E: ParseError<&'a str> + ContextError<&'a str>>(input: 
 }
 
 fn parse_proc<'a, E: ParseError<&'a str> + ContextError<&'a str>>(input: &'a str) -> IResult<&'a str, Stmt, E> {
+    // Parse an optional export keyword, followed by a function definition
+    // let (input, _) = whitespace(input)?;
+    // let (input, export) = opt(tag("export"))(input)?;
     let (input, _) = whitespace(input)?;
     let (input, _) = tag("fun")(input)?;
     let (input, _) = whitespace(input)?;
@@ -654,6 +657,7 @@ fn parse_proc<'a, E: ParseError<&'a str> + ContextError<&'a str>>(input: &'a str
     let (input, _) = tag(")")(input)?;
     let (input, _) = whitespace(input)?;
     let (input, block) = cut(parse_block)(input)?;
+    // Ok((input, proc(export.is_some(), name, args, Stmt::Block(block))))
     Ok((input, proc(name, args, Stmt::Block(block))))
 }
 

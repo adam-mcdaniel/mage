@@ -7,6 +7,9 @@ pub use llvm::*;
 mod c;
 pub use c::*;
 
+mod cword;
+pub use cword::*;
+
 fn wrap_symbol_name(name: &Symbol) -> String {
     format!("_{}", name)
 }
@@ -43,7 +46,8 @@ pub(super) fn lift_global_decls(stmts: Vec<Stmt>) -> (Vec<Stmt>, Vec<Stmt>) {
 
 pub trait CompileTarget {
     fn has_extern(&self, name: &str) -> bool;
-    fn compile(&mut self, program: Stmt) -> Result<String>;
+    fn compile_main(&mut self, program: Stmt) -> Result<String>;
+    fn compile_lib(&mut self, program: Stmt) -> Result<String>;
     fn compile_expr(&mut self, expr: &Expr, env: &Env) -> Result<String>;
     fn compile_stmt(&mut self, stmt: &Stmt, env: &Env) -> Result<String>;
 }
